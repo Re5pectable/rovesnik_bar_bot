@@ -1,0 +1,5 @@
+venv
+config.py
+sessions/rovesnik.session
+__pycache__
+test.py
