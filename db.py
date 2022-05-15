@@ -3,15 +3,20 @@ from unittest.mock import Base
 from pydantic import BaseModel
 import datetime
 from typing import Union
+import aiosqlite
+import asyncio
 
 class User(BaseModel):
     id: int = None
     tg_id: int
     current_state: str = "hanging"
+    last_activity: datetime.datetime
+    was_asked: bool = False
 
 class Order(BaseModel):
     id: int = None
     made_by_user: int = None
+    user_login: str = None
     name: str = None
     n_guests: int = None
     phone: str = None
@@ -20,8 +25,9 @@ class Order(BaseModel):
     weekday: int = None
     time: str = None
     deposit: int = None
+    ten_offer: bool = None
     confirmed: bool = False
-    deposit_sent: bool = False
+    deposit_sent: bool = None
     created: datetime.datetime = None
 
 class Event(BaseModel):
@@ -31,69 +37,102 @@ class Event(BaseModel):
     title: str
     event_type: str
 
+class ScheduledMessage(BaseModel):
+    id: int = None
+    to_id: int
+    time: datetime.datetime
+    type: int
+
+
 class DB:
     def __init__(self):
         with sqlite3.connect("database.sqlite") as c:
-            c.execute("create table if not exists users (id integer primary key autoincrement, tg_id int, current_state varchar(16));")
+            c.execute("create table if not exists users (id integer primary key autoincrement, made_by_id int, name varchar(32), n_guests int, phone varchar(16), date datetime, time datetime, deposit tinyint(1), confirmed tinyint(1));")
             c.execute("create table if not exists orders (id integer primary key autoincrement, made_by_id int, name varchar(32), n_guests int, phone varchar(16), date datetime, time datetime, deposit tinyint(1), confirmed tinyint(1));")
-            c.execute("create table if not exists events (id integer primary key autoincrement, date datetime, time datetime, title text, event_type varchar(16));")    
+            c.execute("create table if not exists events (id integer primary key autoincrement, date datetime, time datetime, title text, event_type varchar(16));")
+            c.execute("create table if not exists scheduled (id integer primary key autoincrement, to_id int, time datetime, type int);")
+            c.execute("create table if not exists coupons (id intteger primary key autoincrement, code varchar(10));")
 
-    def recreate_table_orders(self):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute("drop table if exists orders")
-            c.execute("create table orders (id integer primary key autoincrement, made_by_id int, name varchar(32), n_guests int, phone varchar(16), date datetime, time datetime, deposit tinyint(1), confirmed tinyint(1));")
+    async def initialize_db(self):
+        self.con  = await aiosqlite.connect("database.sqlite")
 
-    def recreate_table_users(self):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute("drop table if exists users")
-            c.execute("create table users (id integer primary key autoincrement, tg_id int, current_state varchar(16));")
+    async def recreate_table_orders(self):
+        await self.con.execute("drop table if exists orders")
+        await self.con.execute("create table orders (id integer primary key autoincrement, made_by_id int, name varchar(32), n_guests int, phone varchar(16), date datetime, time datetime, deposit tinyint(1), confirmed tinyint(1));")
+        await self.con.commit()
 
-    def recreate_table_events(self):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute("drop table if exists events")
-            c.execute("create table events (id integer primary key autoincrement, date datetime, time datetime, title text, event_type varchar(16));")            
+    async def recreate_table_users(self):
+            await self.con.execute("drop table if exists users")
+            await self.con.execute("create table users (id integer primary key autoincrement, tg_id int, current_state varchar(16), last_activity datetime, was_asked tinyint(1));")
+            await self.con.commit()
 
-    def add_user(self, tg_id: int, current_state: str = "hanging"):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute(f"insert into users (tg_id, current_state) values ('{tg_id}', '{current_state}')")
+    async def recreate_table_events(self):
+        await self.con.execute("drop table if exists events")
+        await self.con.execute("create table events (id integer primary key autoincrement, date datetime, time datetime, title text, event_type varchar(16));")            
+        await self.con.commit()
 
-    def get_user(self, tg_id: int):
-        with sqlite3.connect("database.sqlite") as c:
-            r = c.execute(f"select * from users where tg_id = '{tg_id}'").fetchone()
-            if r:
-                return User(id=r[0], tg_id=r[1], current_state=r[2])
+    async def add_user(self, tg_id: int, current_state: str = "hanging"):
+        await self.con.execute(f"insert into users (tg_id, current_state) values ('{tg_id}', '{current_state}')")
+        await self.con.commit()
 
-    def update_user_state(self, tg_id: int, current_state: str):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute(f"update users set current_state='{current_state}' where tg_id='{tg_id}'")
+    async def get_user(self, tg_id: int):
+        r = await (await self.con.execute(f"select * from users where tg_id = '{tg_id}'")).fetchone()
+        if r: return User(id=r[0], tg_id=r[1], current_state=r[2], last_activity=r[3], was_asked=r[4])
 
-    def add_order(self, tg_id: int, name: str = None):
-        with sqlite3.connect("database.sqlite") as c:
-            if name:    
-                c.execute(f"insert into orders (made_by_id, name) values ('{tg_id}', '{name}')")
-            else:
-                c.execute(f"insert into orders (made_by_id) values ('{tg_id}')")
+    async def update_user_state(self, tg_id: int, current_state: str):
+        await self.con.execute(f"update users set current_state='{current_state}' where tg_id='{tg_id}'")
+        await self.con.commit()
 
-    def update_order(self, made_by_user: int, param_name: str, value):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute(f"update orders set '{param_name}'='{value}' where made_by_id='{made_by_user}'")
+    async def update_user(self, user: User):
+        await self.con.execute(f"update users set current_state='{user.current_state}', \
+            last_activity='{user.last_activity}', \
+                was_asked={user.was_asked} \
+                    where tg_id='{user.tg_id}';")
+        await self.con.commit()
 
-    def get_orders_by_user_id(self, user_id: int):
-        with sqlite3.connect("database.sqlite") as c:
-            r = c.execute(f"SELECT * FROM orders where made_by_id = '{user_id}' ORDER BY id DESC").fetchall()
-            return r
+    async def get_and_remove_coupon(self, coupon: str):
+        coupons = await (await self.con.execute(f"select * from coupons where coupon = '{coupon}'")).fetchall()
+        print(coupons)
+        if coupons:
+            await self.con.execute(f"delete from coupons where id = {coupon[0][0]}")
+            await self.con.commit()
 
-    def add_event(self, event: Event):
-        with sqlite3.connect("database.sqlite") as c:
-            c.execute(f"insert into events (date, time, title, event_type) values ('{event.date}', '{event.time}', '{event.title}', '{event.event_type}')")
 
-    def get_events_by_date(self, date: str):
-        with sqlite3.connect("database.sqlite") as c:
-            res = c.execute(f"select * from events where date='{date}'").fetchall()
-            return [Event(id=r[0], date=r[1], time=r[2], title=r[3], event_type=r[4]) for r in res]
+    # def add_event(self, event: Event):
+    #     with sqlite3.connect("database.sqlite") as c:
+    #         c.execute(f"insert into events (date, time, title, event_type) values ('{event.date}', '{event.time}', '{event.title}', '{event.event_type}')")
 
-    def execute(self, command: str):
-        with sqlite3.connect("database.sqlite") as c:
-            return c.execute(command).fetchall()
+    # def get_events_by_date(self, date: str):
+    #     with sqlite3.connect("database.sqlite") as c:
+    #         res = c.execute(f"select * from events where date='{date}'").fetchall()
+    #         return [Event(id=r[0], date=r[1], time=r[2], title=r[3], event_type=r[4]) for r in res]
 
-db = DB()
+    async def add_scheduled_message(self, message: ScheduledMessage):
+        await self.con.execute(f"insert into scheduled (to_id, time, type) values ('{message.to_id}', '{message.time}', '{message.type}')")
+        await self.con.commit()
+
+    async def get_all_scheduled(self):
+        res = await (await self.con.execute(f"select * from scheduled")).fetchall()
+        return [ScheduledMessage(id=r[0], to_id=r[1], time=r[2], type=r[3]) for r in res]
+    
+    async def delete_scheduled_messages(self, messages: list[ScheduledMessage]):
+        await self.con.execute(f"delete from scheduled where id in ({', '.join([str(mes.id) for mes in messages])})")
+        await self.con.commit()
+ 
+    async def get_afk(self):
+        res = await (await self.con.execute(f"select * from users where strftime('%s', last_activity) BETWEEN strftime('%s', '2022-01-01 00:00:00.000000') AND strftime('%s', '{datetime.datetime.now() - datetime.timedelta(seconds=15)}') and was_asked={False}")).fetchall()
+        return [User(id=r[0], tg_id=r[1], current_state=r[2], last_activity=r[3], was_asked=r[4]) for r in res]
+
+    async def execute(self, command: str):
+        await self.con.execute(command)
+    
+    async def commit(self):
+        await self.con.commit()
+
+
+async def get_db():
+    db = DB()
+    await db.initialize_db()
+    return db
+
+asyncio.run(get_db())
