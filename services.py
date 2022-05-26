@@ -1,7 +1,8 @@
 from pyrogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 import datetime
 import time
-from db import Order
+from db import Order, Coupon
+from random import randint
 
 # BR - BOOK REFUSE  - отказатьс в бронировании
 # BC - BOOK CONFIRM - подтвердить бронь
@@ -124,3 +125,18 @@ def gen_usual_review(message):
     return f"Беcкупонный отзыв:\n\n{message.text}"
 
 def gen_coupon():
+    res = ""
+    let = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    for i in range(5):
+        res += let[randint(0, len(let)-1)]
+    print(res)
+    return res
+
+def gen_coupons_message(coupons: list[Coupon]):
+    res = ""
+    for coupon in coupons:
+        if coupon.type == 1:
+            res += f"**{coupon.text}** - бесплатный кофе\n"
+    res += "\nЧтобы активировать промокод, введите **/activate** [промокод]"
+    res += "\nПосле этого подарок можно будет получить на кассе"
+    return res

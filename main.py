@@ -4,7 +4,6 @@ from config import config
 from settings import *
 from db import *
 import time, datetime
-from concurrent.futures import ProcessPoolExecutor
 import asyncio
 from services import *
 
@@ -29,15 +28,21 @@ db: DB = None
 # Отзывы
 @app.on_message(filters.private & filters.reply)
 async def review(client, message):
-    print(1)
     if message.reply_to_message:
-        print(2)
-        if message.reply_to_message.text.startswith("Кажется, вы недавно к нам заходили") and message.reply_to_message.from_user.username == config.bot_name:
-            await client.send_message(config.feedback_chat_id, f"Купонный отзыв: \n\n{message.text}")
-            reply = await message.reply("Спасибо за ваш отзыв!")
-            await asyncio.sleep(3)
-            await reply.delete()
-            await client.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message.reply_to_message_id])
+        if message.reply_to_message.text.startswith("Как прошёл ваш вечер в Ровеснике?") and message.reply_to_message.from_user.username == config.bot_name:
+            try:
+                await client.send_message(config.feedback_chat_id, f"Купонный отзыв: \n\n{message.text}")
+                reply = await message.reply("Спасибо за ваш отзыв! Вам добавлен промокод, его можно найти в главном меню.")
+                await asyncio.sleep(3)
+                await reply.delete()
+                await client.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message.reply_to_message_id])
+                await db.add_coupon(Coupon(
+                    tg_id=message.from_user.id,
+                    text=gen_coupon(),
+                    type=1
+                ))
+            except:
+                pass
 
 # ///////// тест
 @app.on_message(filters.command("test") & filters.private)
@@ -48,7 +53,7 @@ async def test(client, message):
                 f"• Бронь на имя: **{orders[message.from_user.id].name}**\n"
                 f"• Дата: **{orders[message.from_user.id].date}**\n"
                 f"• Время: **{orders[message.from_user.id].time}**\n"
-                f"• Гостей будет:  **{orders[message.from_user.id].n_guests}**\n"
+                f"• Количество гостей:  **{orders[message.from_user.id].n_guests}**\n"
                 f"• Телефон:  **{orders[message.from_user.id].phone}**\n", reply_markup=markups.info_check)
     await db.update_user_state(message.from_user.id, "checking_info")
 
@@ -87,8 +92,28 @@ async def show_events(client, message):
 
 @app.on_message(filters.regex("Написать отзыв") & filters.private)
 async def show_events(client, message):
-    await message.reply("Напишите что вы думаете о нашем баре", reply_markup=markups.usual_review)
+    await message.reply("Поделитесь своим опытом от пребывания в нашем баре.", reply_markup=markups.usual_review)
     await db.update_user(User(tg_id=message.from_user.id, current_state="typing_review_u", last_activity=datetime.datetime.now()))
+
+@app.on_message(filters.regex("Мои промокоды") & filters.private)
+async def show_promocodes(client, message):
+    promos = await db.get_coupons_by_id(message.from_user.id)
+    if promos:
+        await message.reply(gen_coupons_message(promos))
+    else:
+        await message.reply("У вас пока нет промокодов. Их можно получить, например, посетив наш бар и оставив отзыв.")
+
+@app.on_message(filters.command("activate") & filters.private)
+async def activate_coupon(client, message):
+    coupon = Coupon(tg_id=message.from_user.id, text=message.text.replace("/activate ", "").upper())
+    users_coupons = await db.get_coupons_by_id(message.from_user.id)
+    for c in users_coupons:
+        if coupon.text == c.text:
+            await db.delete_coupon(coupon)
+            await message.reply_photo("media/type_1_promo.jpeg", caption=f"Прмокод **{coupon.text}** активирован!")
+            return 
+    await message.reply("У вас нет такого промокода")
+
 
 @app.on_message(filters.regex("Домой") & filters.private)
 async def go_home(client, message):
@@ -108,9 +133,7 @@ async def show_book(client, message):
 
 @app.on_message(filters.private)
 async def activity(client, message):
-    # try:
-    if True:
-        # s = time.time()
+    try:
         user_id = message.from_user.id
         current_state = (await db.get_user(user_id)).current_state
 
@@ -144,7 +167,7 @@ async def activity(client, message):
                 await db.update_user(User(tg_id=message.from_user.id, current_state="typing_name", last_activity=datetime.datetime.now()))
                 await message.reply(config_messages.what_name, reply_markup=markups.typing_name_state)
             elif message.text == "От 10":
-                await message.reply("Для группы больше десяти человек у нас особые правила. Напечатайте количество, например, **13**", reply_markup=markups.minimal)
+                await message.reply("Для компаний от 10 человек у нас действует система депозита — 1000₽ с человека. Бронь вносим после оплаты. Если вам подходит, напишите, пожалуйста, точное количество человек например, **13**", reply_markup=markups.minimal)
             elif message.text.isdigit():
                 if 0 < int(message.text) < 10:
                     await db.update_user(User(tg_id=message.from_user.id, current_state="typing_date", last_activity=datetime.datetime.now()))
@@ -183,7 +206,7 @@ async def activity(client, message):
                                 "Напоминаем, Мы работаем с 09 до 06. Какое время вас интересует?", reply_markup=time_markup(day_type=day_type, halved=False))
 
                 elif day_type == 'live':
-                    message.reply(f"{weekdays_mapping[weekday]}, {message.text}\n\n"
+                    await message.reply(f"{weekdays_mapping[weekday]}, {message.text}\n\n"
                                 "Напоминаем, Мы работаем с 09 до 01. Какое время вас интересует?", reply_markup=time_markup(day_type=day_type, halved=False))
 
                 orders[message.from_user.id].date = message.text
@@ -246,7 +269,7 @@ async def activity(client, message):
                             f"• Бронь на имя: **{orders[message.from_user.id].name}**\n"
                             f"• Дата: **{orders[message.from_user.id].date}**\n"
                             f"• Время: **{orders[message.from_user.id].time}**\n"
-                            f"• Гостей будет:  **{orders[message.from_user.id].n_guests}**\n"
+                            f"• Количество гостей:  **{orders[message.from_user.id].n_guests}**\n"
                             f"• Телефон:  **{orders[message.from_user.id].phone}**\n", reply_markup=markups.info_check)
                 await db.update_user(User(tg_id=message.from_user.id, current_state="checking_info", last_activity=datetime.datetime.now()))
             elif message.text == "Назад":
@@ -282,9 +305,9 @@ async def activity(client, message):
             await message.reply("Спасибо за ваш отзыв!", reply_markup=markups.basic_markup)
             await db.update_user(User(tg_id=message.from_user.id, last_activity=datetime.datetime.now()))
             
-    # except Exception as e:
-    #     print(e)
-    #     message.reply("У нас что-то пошло не так. Попробуйте нажать /start")
+    except Exception as e:
+        print(e)
+        message.reply("У нас что-то пошло не так. Попробуйте нажать /start")
 
 
 @app.on_callback_query()
@@ -296,10 +319,10 @@ async def calbacks(client, callback_query):
     if callback_query.data[:2] == 'BC':
         await callback_query.edit_message_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("ПОДТВЕРЖДЕНО", callback_data="pass")]]))
         user_id = int(callback_query.data[2:])
-        await client.send_message(user_id, f"Ваше бронирование подтверждено! Ждем в Ровеснике {orders[user_id].date} в {orders[user_id].time}")
+        await client.send_message(user_id, f"Ждем в Ровеснике **{orders[user_id].date}** в **{orders[user_id].time}**!\nЕсли вы задерживаетесь больше, чем на 15 минут, позвоните, пожалуйста, по телефону **8 (999) 912-72-85**, иначе нам придётся снять бронь. Как придете, обратитесь к менеджеру – вас посадят (можно попросить позвать на баре)")
         await db.add_scheduled_message(ScheduledMessage(
             to_id=user_id,
-            time=datetime.datetime.strptime(f'{orders[user_id].date}.{datetime.datetime.today().year} {orders[user_id].time}', '%d.%m.%Y %H:%M') + datetime.timedelta(minutes=1),
+            time=datetime.datetime.strptime(f'{orders[user_id].date}.{datetime.datetime.today().year} {orders[user_id].time}', '%d.%m.%Y %H:%M') + datetime.timedelta(seconds=5),
             type=1
         ))
         del orders[user_id]
@@ -317,7 +340,7 @@ async def calbacks(client, callback_query):
         user_id = int(callback_query.data[2:])
         orders[user_id].ten_offer = False
         await callback_query.edit_message_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("Ждем ответа про 22:00", callback_data="pass")]]))
-        await client.send_message(user_id, f"У нас может не хватить столов. Вы готовы уйти в 10?", reply_markup=client_ten_clock_markup(user_id))
+        await client.send_message(user_id, f"В пятницу и субботу мы заканчиваем обслуживание в зале, убираем часть столов и начинаем готовиться к вечеринке. Вам подойдёт, если ваш столик будет до 22:00?", reply_markup=client_ten_clock_markup(user_id))
     
     # Принятие
     elif callback_query.data[:2] == 'TA':
@@ -338,7 +361,7 @@ async def calbacks(client, callback_query):
     elif callback_query.data[:2] == 'DD':
         user_id = int(callback_query.data[2:])
         await callback_query.edit_message_reply_markup(InlineKeyboardMarkup([[InlineKeyboardButton("Ждем депозит", callback_data="pass")]]))
-        await client.send_message(user_id, f"Бронирование предварительно согласовано, но вам нужно отправить депозит на этот номер", reply_markup=client_deposit_markup(user_id))
+        await client.send_message(user_id, f"Переведите, пожалуйста, депозит нам по номеру телефона ниже и пришлите скриншот:\nСБЕРБАНК\n89151549863\nЛюбовь Ю. Ю.", reply_markup=client_deposit_markup(user_id))
     
     # Клиент нажал отправлено
     elif callback_query.data[:2] == 'DC':
@@ -368,12 +391,14 @@ async def bot_service():
             if message.time < datetime.datetime.now():
                 temp.append(message)
                 if message.type == 1: # Через 24 часа после посещения
-                    await app.send_message(message.to_id, "Кажется, вы недавно к нам заходили. Напишите отзыв и получите купон на бесплатный кофе. Чтобы отзыв засчитался, необходимо ОТВЕТИТЬ на это сообщение. Для этого проведите по этому сообщению вправо.")
+                    await app.send_message(message.to_id, "Как прошёл ваш вечер в Ровеснике? (Чтобы ваш отзыв засчитался, пожалуйста ОТВЕТЬТЕ на это сообщение. Для этого можно потянуть сообщение вправо или воспользоваться долгим нажатием)")
         await db.delete_scheduled_messages(temp)
 
         for person in await db.get_afk():
             await db.update_user(User(tg_id=person.tg_id, last_activity=datetime.datetime.now(), was_asked=True))
-            await app.send_message(person.tg_id, "Просто напоминаем о себе :) \n\nНе хотите ли забронировать стол?", reply_markup=markups.basic_markup)
+            await app.send_message(person.tg_id, "Просто напоминаем о себе :) \n\nНе хотите ли забронировать столик?", reply_markup=markups.basic_markup)
+            if person.tg_id in orders.keys():
+                del orders[person.tg_id]
 
       
 if __name__ == "__main__":

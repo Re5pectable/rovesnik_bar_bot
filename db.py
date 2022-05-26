@@ -43,6 +43,12 @@ class ScheduledMessage(BaseModel):
     time: datetime.datetime
     type: int
 
+class Coupon(BaseModel):
+    tg_id: int
+    type: int = None
+    text: str
+
+
 
 class DB:
     def __init__(self):
@@ -51,7 +57,8 @@ class DB:
             c.execute("create table if not exists orders (id integer primary key autoincrement, made_by_id int, name varchar(32), n_guests int, phone varchar(16), date datetime, time datetime, deposit tinyint(1), confirmed tinyint(1));")
             c.execute("create table if not exists events (id integer primary key autoincrement, date datetime, time datetime, title text, event_type varchar(16));")
             c.execute("create table if not exists scheduled (id integer primary key autoincrement, to_id int, time datetime, type int);")
-            c.execute("create table if not exists coupons (id intteger primary key autoincrement, code varchar(10));")
+            c.execute("create table if not exists coupons (id integer primary key autoincrement, tg_id int, type int, text varchar(5));")
+
 
     async def initialize_db(self):
         self.con  = await aiosqlite.connect("database.sqlite")
@@ -90,22 +97,17 @@ class DB:
                     where tg_id='{user.tg_id}';")
         await self.con.commit()
 
-    async def get_and_remove_coupon(self, coupon: str):
-        coupons = await (await self.con.execute(f"select * from coupons where coupon = '{coupon}'")).fetchall()
-        print(coupons)
-        if coupons:
-            await self.con.execute(f"delete from coupons where id = {coupon[0][0]}")
-            await self.con.commit()
+    async def add_coupon(self, coupon: Coupon):
+        await self.con.execute(f"insert into coupons (tg_id, type, text) values ('{coupon.tg_id}','{coupon.type}', '{coupon.text}')")
+        await self.con.commit()
 
+    async def get_coupons_by_id(self, tg_id: int):
+        res = await (await self.con.execute(f"select type, text from coupons where tg_id = '{tg_id}'")).fetchall()
+        return [Coupon(tg_id=tg_id, type=r[0], text=r[1]) for r in res]
 
-    # def add_event(self, event: Event):
-    #     with sqlite3.connect("database.sqlite") as c:
-    #         c.execute(f"insert into events (date, time, title, event_type) values ('{event.date}', '{event.time}', '{event.title}', '{event.event_type}')")
-
-    # def get_events_by_date(self, date: str):
-    #     with sqlite3.connect("database.sqlite") as c:
-    #         res = c.execute(f"select * from events where date='{date}'").fetchall()
-    #         return [Event(id=r[0], date=r[1], time=r[2], title=r[3], event_type=r[4]) for r in res]
+    async def delete_coupon(self, coupon: Coupon):
+        await self.con.execute(f"delete from coupons where tg_id='{coupon.tg_id}' and text='{coupon.text}'")
+        await self.con.commit()
 
     async def add_scheduled_message(self, message: ScheduledMessage):
         await self.con.execute(f"insert into scheduled (to_id, time, type) values ('{message.to_id}', '{message.time}', '{message.type}')")
@@ -120,7 +122,7 @@ class DB:
         await self.con.commit()
  
     async def get_afk(self):
-        res = await (await self.con.execute(f"select * from users where strftime('%s', last_activity) BETWEEN strftime('%s', '2022-01-01 00:00:00.000000') AND strftime('%s', '{datetime.datetime.now() - datetime.timedelta(seconds=15)}') and was_asked={False}")).fetchall()
+        res = await (await self.con.execute(f"select * from users where strftime('%s', last_activity) BETWEEN strftime('%s', '2022-01-01 00:00:00.000000') AND strftime('%s', '{datetime.datetime.now() - datetime.timedelta(seconds=60)}') and was_asked={False}")).fetchall()
         return [User(id=r[0], tg_id=r[1], current_state=r[2], last_activity=r[3], was_asked=r[4]) for r in res]
 
     async def execute(self, command: str):
@@ -135,4 +137,4 @@ async def get_db():
     await db.initialize_db()
     return db
 
-asyncio.run(get_db())
+# asyncio.run(get_db())
