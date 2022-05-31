@@ -1,8 +1,12 @@
 from pyrogram.types import ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
 import datetime
 import time
-from db import Order, Coupon
+from db import Order, Event, DB
 from random import randint
+from pyrogram import filters
+import pandas as pd
+from typing import List
+from config import config
 
 # BR - BOOK REFUSE  - отказатьс в бронировании
 # BC - BOOK CONFIRM - подтвердить бронь
@@ -15,6 +19,8 @@ from random import randint
 # TO - TEN OFFER - встать в 10 вечера из-за стола
 # TA - TEN ACCEPTED
 # TD - TEN DECLINED
+
+# GE - GET EVENT
 
 def moder_markup(order: Order, confirmed=None):
     k = []
@@ -122,17 +128,16 @@ def gen_moder_conf(order: Order):
            f"• Депозит:  **{order.deposit}**"
 
 def gen_usual_review(message):
-    return f"Беcкупонный отзыв:\n\n{message.text}"
+    return f"[Беcкупонный отзыв]\n\n{message.text}"
 
 def gen_coupon():
     res = ""
     let = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     for i in range(5):
         res += let[randint(0, len(let)-1)]
-    print(res)
     return res
 
-def gen_coupons_message(coupons: list[Coupon]):
+def gen_coupons_message(coupons: list):
     res = ""
     for coupon in coupons:
         if coupon.type == 1:
@@ -140,3 +145,40 @@ def gen_coupons_message(coupons: list[Coupon]):
     res += "\nЧтобы активировать промокод, введите **/activate** [промокод]"
     res += "\nПосле этого подарок можно будет получить на кассе"
     return res
+
+def create_updates_list(file_name: str):
+    data = pd.read_excel(f"downloads/{file_name}")
+    events = []
+    for _, row in data.iterrows():
+        events.append(Event(date=row[0],event_type=row[1],title=row[2],description=row[3]))
+    return events
+
+def events_markup(events: List[Event]):
+    markup = []
+    for i in range(len(events)):
+        markup.append(InlineKeyboardButton(f"#{i+1}", callback_data=f"GE{events[i].id}"))
+    return InlineKeyboardMarkup([markup[i:i + 4] for i in range(0, len(markup), 4)])
+
+def gen_events_text(events: List[Event]):
+    text = ""
+    for i in range(len(events)):
+        text += f"**#{i+1}** - {events[i].title} ({events[i].date.strftime('%d.%m')})\n\n"
+    return text
+
+def gen_event_text(event: Event):
+    return f"**{event.title}**\n{event.date.strftime('%d.%m')}\n\n{event.description}"
+
+def admin_filter(fit, _, message):
+    res = DB().start_get_admins()
+    if message.from_user.id in res:
+        return True
+    else:
+        message.reply("Вас нет в списке администраторов")
+        return False
+
+def review_filter(fit, _, message):
+    return message.reply_to_message.text.startswith("Как прошёл ваш вечер в Ровеснике?") and \
+        message.reply_to_message.from_user.username.lower() == config.bot_name.lower()
+
+admin_filter = filters.create(admin_filter)
+review_filter = filters.create(review_filter)

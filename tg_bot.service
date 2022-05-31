@@ -1,0 +1,13 @@
+[Unit]
+Description=Rovesnik TG Bot
+After=syslog.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/user/
+ExecStart=/usr/bin/python3 test_daemon.py
+
+[Install]
+WantedBy=multi-user.target

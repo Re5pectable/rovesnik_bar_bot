@@ -6,48 +6,37 @@ from db import *
 import time, datetime
 import asyncio
 from services import *
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-app = Client("sessions/rovesnik", api_id = config.api_id, api_hash = config.api_hash, bot_token = config.bot_token)
+print("--- START")
+app = Client("sessions/rovesnik_bot", api_id = config.api_id, api_hash = config.api_hash, bot_token=config.bot_token)
 
-user_states = ["hanging", "typing_is_today", "typing_name", "typing_n_guests", "typing_time", "typing_phone", "checking_info", "waiting_confirm", "sending_deposit", "typing_review_u"]
-# typing_review_u отзыв из глвного меню (usual)
-# typing_review_b отзыв после посещения (booked)
-# typing_review_a отзыв после бездействия (afk)
+try: app.disconnect()
+except: pass
+
+try: app.stop()
+except: pass
+
+print("--- Client is ready")
 
 
-weekdays = [0, 1, 2, 3]
-parties = [4, 5]
-lives = [6]
+"hanging", "typing_is_today", "typing_name", "typing_n_guests", "typing_time", "typing_phone", "checking_info", "waiting_confirm", "sending_deposit", "typing_review_u"
+
+# 0- до часа 
+# 1- до 6 утра 
+# 2- до часа
 
 weekdays_mapping = {0: "Понедельник", 1: "Вторник", 2: "Среда", 3: "Четверг", 4: "Пятница", 5: "Суббота", 6: "Воскресенье"}
-
 orders = {}
 
-db: DB = None
+db = DB()
+print("--- Database is ready")
 
-# Отзывы
-@app.on_message(filters.private & filters.reply)
-async def review(client, message):
-    if message.reply_to_message:
-        if message.reply_to_message.text.startswith("Как прошёл ваш вечер в Ровеснике?") and message.reply_to_message.from_user.username == config.bot_name:
-            try:
-                await client.send_message(config.feedback_chat_id, f"Купонный отзыв: \n\n{message.text}")
-                reply = await message.reply("Спасибо за ваш отзыв! Вам добавлен промокод, его можно найти в главном меню.")
-                await asyncio.sleep(3)
-                await reply.delete()
-                await client.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message.reply_to_message_id])
-                await db.add_coupon(Coupon(
-                    tg_id=message.from_user.id,
-                    text=gen_coupon(),
-                    type=1
-                ))
-            except:
-                pass
 
-# ///////// тест
-@app.on_message(filters.command("test") & filters.private)
+# Админка
+@app.on_message(filters.command("test") & filters.private & admin_filter)
 async def test(client, message):
-    from test_order import test_order
+    test_order = Order(id=None, made_by_user=253410446, user_login='g1e6_b', name='fvg', n_guests='20', phone="2828127182", date='28.04', day_type='basic', weekday=3, time='11:00', deposit=20000, ten_offer=None, confirmed=False, deposit_sent=None, created=datetime.datetime(2022, 4, 25, 19, 5, 14, 522086))
     orders[message.from_user.id] = test_order
     await message.reply("Проверим еще разок\n\n"
                 f"• Бронь на имя: **{orders[message.from_user.id].name}**\n"
@@ -56,6 +45,92 @@ async def test(client, message):
                 f"• Количество гостей:  **{orders[message.from_user.id].n_guests}**\n"
                 f"• Телефон:  **{orders[message.from_user.id].phone}**\n", reply_markup=markups.info_check)
     await db.update_user_state(message.from_user.id, "checking_info")
+
+@app.on_message(filters.command("add_events") & admin_filter & filters.private)
+async def add_events(client, message):
+    if message.document:
+        if ".xlsx" not in message.document.file_name:
+            await message.reply("Отправьте файл в формате .xlsx (Столбцы: Дата, Формат, Название, Описание)")
+            return
+        await message.download()
+        events = create_updates_list(message.document.file_name)
+        await db.add_events(events)
+        await message.reply(f"Добавлено {len(events)} событий!")
+    else:
+        await message.reply("Вы не отправили документ")
+
+@app.on_message(filters.command("change_main_menu") & admin_filter & filters.private)
+async def change_main_menu(client, message):
+    if message.document:
+        if message.document.file_name == "main_menu.pdf":
+            await message.download("media/main_menu.pdf")
+            await message.reply("Файл главного меню измнен")
+        else:
+            await message.reply("Пришлите файл **main_menu.pdf**")
+    else:
+        await message.reply("Вы не отправили документ")
+
+@app.on_message(filters.command("change_bar") & admin_filter & filters.private)
+async def change_bar(client, message):
+    if message.document:
+        if message.document.file_name == "bar.pdf":
+            await message.download("media/bar.pdf")
+            await message.reply("Файл бара измнен")
+        else:
+            await message.reply("Пришлите файл **bar.pdf**")
+    else:
+        await message.reply("Вы не отправили документ")
+
+@app.on_message(filters.command("change_na_bar") & admin_filter & filters.private)
+async def change_na_bar(client, message):
+    if message.document:
+        if message.document.file_name == "na_bar.pdf":
+            await message.download("media/na_bar.pdf")
+            await message.reply("Файл безалкогольного бара изменен")
+        else:
+            await message.reply("Пришлите файл **na_bar.pdf**")
+    else:
+        await message.reply("Вы не отправили документ")
+
+@app.on_message(filters.command("admins") & admin_filter & filters.private)
+async def get_all_admins(client, message):
+    admins = await db.get_admins()
+    text = ""
+    for admin in admins:
+        text += f"**tg_id**: {admin.tg_id}\n**tg_name**: {admin.tg_name}\n**added as admin**: {admin.added.strftime('%Y-%m-%d %H:%M')}\n\n"
+    await message.reply(text)
+
+
+@app.on_message(filters.command("add_admin") & admin_filter & filters.private)
+async def add_admin(client, message):
+    try:
+        tg_id = int(message.text.split(" ")[1])
+        tg_name = (await client.get_users(tg_id)).username
+        await db.add_admin(Admin(tg_id=tg_id, tg_name=tg_name, added=datetime.datetime.now()))
+        await message.reply(f"Пользователь {tg_id} (@{tg_name}) добавлен в администраторы")
+    except Exception as e:
+        await message.reply("После команды укажите ID пользователя (не @). Пример **/add_admin 123456789**. Также, такое сообщение может появиться, если пользователь не найден. Воспользуйтесь @getmyid_bot")
+
+@app.on_message(filters.command("del_admin") & admin_filter & filters.private)
+async def del_amin(client, message):
+        try:
+            tg_id = int(message.text.split(" ")[1])
+            await db.delete_admin(tg_id)
+            await message.reply(f"Пользователь {tg_id} удален из списка админов")
+        except: 
+            await message.reply("После команды укажите ID пользователя (не @). Пример **/del_admin 123456789**")
+
+# Команды
+@app.on_message(filters.command("activate") & filters.private)
+async def activate_coupon(client, message):
+    coupon = Coupon(tg_id=message.from_user.id, text=message.text.replace("/activate ", "").upper())
+    users_coupons = await db.get_coupons_by_id(message.from_user.id)
+    for c in users_coupons:
+        if coupon.text == c.text:
+            await db.delete_coupon(coupon)
+            await message.reply_photo("media/type_1_promo.jpeg", caption=f"Прмокод **{coupon.text}** активирован!")
+            return 
+    await message.reply("У вас нет такого промокода")
 
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
@@ -67,27 +142,45 @@ async def start_command(client, message):
         del orders[message.from_user.id]
     await message.reply(config_messages.hello_message, reply_markup=markups.basic_markup)
 
+# Отзывы
+@app.on_message(filters.private & filters.reply & review_filter)
+async def review(client, message):
+    try:
+        await client.send_message(config.feedback_chat_id, f"[Купонный отзыв] \n\n{message.text}")
+        reply = await message.reply("Спасибо за ваш отзыв! Вам добавлен промокод, его можно найти в главном меню.")
+        await asyncio.sleep(3)
+        await reply.delete()
+        await client.delete_messages(chat_id=message.chat.id, message_ids=[message.message_id, message.reply_to_message_id])
+        await db.add_coupon(Coupon(
+            tg_id=message.from_user.id,
+            text=gen_coupon(),
+            type=1
+        ))
+    except:
+        pass
+
 @app.on_message(filters.regex("Главное меню") & filters.private)
 async def show_main_menu(client, message):
-    await message.reply("Вот главное меню")
+    await client.send_document(message.from_user.id, "media/main_menu.pdf")
     await db.update_user(User(tg_id=message.from_user.id, last_activity=datetime.datetime.now()))
 
 
 @app.on_message(filters.regex("Барное меню") & filters.private)
 async def show_bar_menu(client, message):
-    await message.reply("Вот барное меню")
+    await client.send_document(message.from_user.id, "media/bar.pdf")
     await db.update_user(User(tg_id=message.from_user.id, last_activity=datetime.datetime.now()))
 
 
 @app.on_message(filters.regex("Б/а меню") & filters.private)
 async def show_nonalchive_menu(client, message):
-    await message.reply("Вот безалкогольное меню")
+    await client.send_document(message.from_user.id, "media/na_bar.pdf")
     await db.update_user(User(tg_id=message.from_user.id, last_activity=datetime.datetime.now()))
 
 
 @app.on_message(filters.regex("Мероприятия") & filters.private)
 async def show_events(client, message):
-    await message.reply("Мероприятия")
+    events = (await db.get_next_events(datetime.datetime.now()))
+    await message.reply(f"Вот наши ближайшие мероприятия: \n\n{gen_events_text(events)}", reply_markup=events_markup(events))
     await db.update_user(User(tg_id=message.from_user.id, last_activity=datetime.datetime.now()))
 
 @app.on_message(filters.regex("Написать отзыв") & filters.private)
@@ -102,17 +195,6 @@ async def show_promocodes(client, message):
         await message.reply(gen_coupons_message(promos))
     else:
         await message.reply("У вас пока нет промокодов. Их можно получить, например, посетив наш бар и оставив отзыв.")
-
-@app.on_message(filters.command("activate") & filters.private)
-async def activate_coupon(client, message):
-    coupon = Coupon(tg_id=message.from_user.id, text=message.text.replace("/activate ", "").upper())
-    users_coupons = await db.get_coupons_by_id(message.from_user.id)
-    for c in users_coupons:
-        if coupon.text == c.text:
-            await db.delete_coupon(coupon)
-            await message.reply_photo("media/type_1_promo.jpeg", caption=f"Прмокод **{coupon.text}** активирован!")
-            return 
-    await message.reply("У вас нет такого промокода")
 
 
 @app.on_message(filters.regex("Домой") & filters.private)
@@ -263,7 +345,7 @@ async def activity(client, message):
 
         elif current_state == 'typing_phone':
             phone = ''.join([n for n in message.text if n.isdigit()])
-            if 7 < len(phone) < 15:
+            if 7 < len(phone) < 15 and (phone.startswith('7') or phone.startswith('+7') or phone.startswith('8')):
                 orders[message.from_user.id].phone = phone
                 await message.reply("Проверим еще разок\n\n"
                             f"• Бронь на имя: **{orders[message.from_user.id].name}**\n"
@@ -307,13 +389,11 @@ async def activity(client, message):
             
     except Exception as e:
         print(e)
-        message.reply("У нас что-то пошло не так. Попробуйте нажать /start")
+        await message.reply("У нас что-то пошло не так. Попробуйте нажать /start")
 
 
 @app.on_callback_query()
 async def calbacks(client, callback_query):
-    print(callback_query.data)
-
     # === Базовое для брони ===
     # Подтверждение брони
     if callback_query.data[:2] == 'BC':
@@ -322,7 +402,7 @@ async def calbacks(client, callback_query):
         await client.send_message(user_id, f"Ждем в Ровеснике **{orders[user_id].date}** в **{orders[user_id].time}**!\nЕсли вы задерживаетесь больше, чем на 15 минут, позвоните, пожалуйста, по телефону **8 (999) 912-72-85**, иначе нам придётся снять бронь. Как придете, обратитесь к менеджеру – вас посадят (можно попросить позвать на баре)")
         await db.add_scheduled_message(ScheduledMessage(
             to_id=user_id,
-            time=datetime.datetime.strptime(f'{orders[user_id].date}.{datetime.datetime.today().year} {orders[user_id].time}', '%d.%m.%Y %H:%M') + datetime.timedelta(seconds=5),
+            time=datetime.datetime.strptime(f'{orders[user_id].date}.{datetime.datetime.today().year} {orders[user_id].time}', '%d.%m.%Y %H:%M') + datetime.timedelta(hours=24),
             type=1
         ))
         del orders[user_id]
@@ -374,41 +454,36 @@ async def calbacks(client, callback_query):
         user_id = int(callback_query.data[2:])
         orders[user_id].deposit_sent = False
         await client.send_message(config.moders_chat_id, gen_moder_conf(orders[user_id]), reply_markup=moder_markup(orders[user_id]))
-    else:
-        pass
 
+    # === Мероприятия ===
+    # Получить данные о мероприятии
+    elif callback_query.data[:2] == 'GE':
+        event_id = callback_query.data[2:]
+        event = await db.get_event_by_id(event_id)
+        await client.send_message(callback_query.from_user.id, gen_event_text(event))
 
-async def bot_main():
-    global db
-    db = await get_db()
-    await app.start()
+print("--- Methods are loaded")
 
 async def bot_service():
-    while True:
-        await asyncio.sleep(10)
-        temp = []
-        for message in await db.get_all_scheduled():
-            if message.time < datetime.datetime.now():
-                temp.append(message)
-                if message.type == 1: # Через 24 часа после посещения
-                    await app.send_message(message.to_id, "Как прошёл ваш вечер в Ровеснике? (Чтобы ваш отзыв засчитался, пожалуйста ОТВЕТЬТЕ на это сообщение. Для этого можно потянуть сообщение вправо или воспользоваться долгим нажатием)")
-        await db.delete_scheduled_messages(temp)
+    temp = []   
+    for message in await db.get_all_scheduled():
+        if message.time < datetime.datetime.now():
+            temp.append(message)
+            if message.type == 1: # Через 24 часа после посещения
+                await app.send_message(message.to_id, "Как прошёл ваш вечер в Ровеснике? (Чтобы ваш отзыв засчитался, пожалуйста ОТВЕТЬТЕ на это сообщение. Для этого можно потянуть сообщение вправо или воспользоваться долгим нажатием)")
+    await db.delete_scheduled_messages(temp)
 
-        for person in await db.get_afk():
-            await db.update_user(User(tg_id=person.tg_id, last_activity=datetime.datetime.now(), was_asked=True))
-            await app.send_message(person.tg_id, "Просто напоминаем о себе :) \n\nНе хотите ли забронировать столик?", reply_markup=markups.basic_markup)
-            if person.tg_id in orders.keys():
-                del orders[person.tg_id]
+    for person in await db.get_afk():
+        await db.update_user(User(tg_id=person.tg_id, last_activity=datetime.datetime.now(), was_asked=True))
+        await app.send_message(person.tg_id, "Просто напоминаем о себе :) \n\nНе хотите ли забронировать столик?", reply_markup=markups.basic_markup)
+        if person.tg_id in orders.keys():
+            del orders[person.tg_id]
 
-      
+
 if __name__ == "__main__":
-    try:
-        loop = asyncio.get_event_loop()
-        asyncio.ensure_future(bot_main())
-        asyncio.ensure_future(bot_service())
-        loop.run_forever()
-
-    except KeyboardInterrupt:
-        print("== BOT STOPPED ===")
-        app.stop()
-        loop.stop()
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(bot_service, "interval", seconds=20)
+    
+    scheduler.start()
+    print("--- Bot is ready")
+    app.run()
