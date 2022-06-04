@@ -146,8 +146,8 @@ def gen_coupons_message(coupons: list):
     res += "\nПосле этого подарок можно будет получить на кассе"
     return res
 
-def create_updates_list(file_name: str):
-    data = pd.read_excel(f"downloads/{file_name}")
+def create_updates_list(file_path: str):
+    data = pd.read_excel(file_path)
     events = []
     for _, row in data.iterrows():
         events.append(Event(date=row[0],event_type=row[1],title=row[2],description=row[3]))
