@@ -5,3 +5,4 @@ __pycache__
 test.py
 sessions/rovesnik_bot.session
 database.sqlite
+.DS_Store
