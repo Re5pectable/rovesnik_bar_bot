@@ -3,3 +3,5 @@ config.py
 sessions/rovesnik.session
 __pycache__
 test.py
+sessions/rovesnik_bot.session
+database.sqlite
