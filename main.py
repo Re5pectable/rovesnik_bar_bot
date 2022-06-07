@@ -11,7 +11,7 @@ import sys
 
 print("--- START")
 app = Client("sessions/rovesnik_bot", api_id = config.api_id, api_hash = config.api_hash, bot_token=config.bot_token)
-# app = Client("sessions/rovesnik_bot", api_id = config.api_id, api_hash = config.api_hash, bot_token="5385158747:AAE0kn51BbxOJ2I2Mg84A0VzVoriioQkL6k")
+
 
 try: app.disconnect()
 except: pass
