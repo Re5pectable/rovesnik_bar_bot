@@ -30,6 +30,8 @@ class Order(BaseModel):
     ten_offer: bool = None
     confirmed: bool = False
     deposit_sent: bool = None
+    deposit_ask_message_id: int = None
+    leave_at_ten_message_id: int = None
     created: datetime.datetime = None
 
 class Event(BaseModel):
@@ -84,6 +86,14 @@ CREATE_TABLE_ADMINS = "create table if not exists admins \
     tg_name varchar(32),\
     added datetime);"
 
+CREATE_TABLE_ORDERS = "create table if not exists orders \
+    (id integer primary key autoincrement,\
+    date datetime,\
+    guest_tg_id int,\
+    guest_name varchar(32),\
+    guest_phone varchar(16),\
+    created_at datetime);"
+
 class DB:
     def __init__(self):
         self.path = sys.path[0] + "/database.sqlite"
@@ -93,6 +103,7 @@ class DB:
             c.execute(CREATE_TABLE_SCHEDULED)
             c.execute(CREATE_TABLE_COUPONS)
             c.execute(CREATE_TABLE_ADMINS)
+            c.execute(CREATE_TABLE_ORDERS)
 
     # ===============
     # CREATING TABLES
@@ -130,6 +141,15 @@ class DB:
             if recreate:
                 await db.execute("drop table if exists admins")
             await db.execute(CREATE_TABLE_ADMINS)
+            await db.commit()
+
+    # ORDERS
+    async def add_order(self, order: Order):
+        with sqlite3.connect(self.path) as db:
+            converted_date = datetime.datetime.strptime(order.date + '.' + str(datetime.datetime.now().year) + ' ' + order.time, '%d.%m.%Y %H:%M')
+            print(converted_date)
+            await db.execute(f"insert into orders (date, guest_tg_id, guest_name, guest_phone, created_at) values \
+                ('{converted_date}', {order.made_by_user}, '{order.name}', '{order.phone}', {datetime.datetime.now()})")
             await db.commit()
 
     # ADMINS
@@ -237,14 +257,14 @@ class DB:
             res = await (await db.execute(f"select * from events where id = {event_id}")).fetchone()
             return Event(date=res[1], title=res[2], description=res[3], event_type=res[4])
 
-    async def add_events(self, events: List[Event]):
-        async with aiosqlite.connect(self.path) as db:
-            query = ""
-            for event in events:
-                query += f"{event.date.strftime('%Y-%m-%d %H:%M'), event.title, event.description, event.event_type},"
-            await db.execute(f"insert into events (date, title, description, event_type) values\
-                {query[:-1]};")
-            await db.commit()
+    # async def add_events(self, events: List[Event]):
+    #     async with aiosqlite.connect(self.path) as db:
+    #         query = ""
+    #         for event in events:
+    #             query += f"{event.date.strftime('%Y-%m-%d %H:%M'), event.title, event.description, event.event_type},"
+    #         await db.execute(f"insert into events (date, title, description, event_type) values\
+    #             {query[:-1]};")
+    #         await db.commit()
 
     # ===
     # AFK

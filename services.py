@@ -25,16 +25,16 @@ from config import config
 def moder_markup(order: Order, confirmed=None):
     k = []
     if order.ten_offer:
-        k.append([InlineKeyboardButton("Готов уйти в 10", callback_data="pass")])
+        k.append([InlineKeyboardButton("✅ Готов уйти в 10", callback_data="pass")])
     elif order.ten_offer is False:
         k.append([InlineKeyboardButton("❌ Отказался уйти в 10", callback_data="pass")])
     elif order.ten_offer is None:
-        k.append([InlineKeyboardButton("Попросить уйти в 10", callback_data=f"TO{str(order.made_by_user)}")])
+        k.append([InlineKeyboardButton("❔ Попросить уйти в 10", callback_data=f"TO{str(order.made_by_user)}")])
 
     if order.deposit and order.deposit_sent is None:
-        k.append([InlineKeyboardButton("Попросить депозит", callback_data=f"DD{str(order.made_by_user)}")])
+        k.append([InlineKeyboardButton("❔ Попросить депозит", callback_data=f"DD{str(order.made_by_user)}")])
     elif order.deposit and order.deposit_sent:
-        k.append([InlineKeyboardButton("Деп. отправлен", callback_data="pass")])
+        k.append([InlineKeyboardButton("✅ Деп. отправлен", callback_data="pass")])
     elif order.deposit and order.deposit_sent is False:
         k.append([InlineKeyboardButton("❌ Отказался вносить деп.", callback_data="pass")])
 
@@ -44,7 +44,6 @@ def moder_markup(order: Order, confirmed=None):
 
 def client_deposit_markup(user_id: int):
     k = []
-    k.append([InlineKeyboardButton("Готово", callback_data=f"DC{str(user_id)}")])
     k.append([InlineKeyboardButton("Отказаться", callback_data=f"DR{str(user_id)}")])
     return InlineKeyboardMarkup(k)
 
@@ -128,7 +127,7 @@ def gen_moder_conf(order: Order):
            f"• Депозит:  **{order.deposit}**"
 
 def gen_usual_review(message):
-    return f"[Беcкупонный отзыв]\n\n{message.text}"
+    return f"[Беcкупонный отзыв] @{message.from_user.username}\n\n{message.text}"
 
 def gen_coupon():
     res = ""
@@ -141,9 +140,8 @@ def gen_coupons_message(coupons: list):
     res = ""
     for coupon in coupons:
         if coupon.type == 1:
-            res += f"**{coupon.text}** - бесплатный кофе\n"
+            res += f"**{coupon.text}** - ваш промокод на бесплатный фильтр-кофе 🤓\n"
     res += "\nЧтобы активировать промокод, введите **/activate** [промокод]"
-    res += "\nПосле этого подарок можно будет получить на кассе"
     return res
 
 def create_updates_list(file_path: str):
@@ -177,7 +175,7 @@ def admin_filter(fit, _, message):
         return False
 
 def review_filter(fit, _, message):
-    return message.reply_to_message.text.startswith("Как прошёл ваш вечер в Ровеснике?") and \
+    return message.reply_to_message.text.startswith("Спасибо за вашу бронь! Нам очень важно ваше мнение") and \
         message.reply_to_message.from_user.username.lower() == config.bot_name.lower()
 
 admin_filter = filters.create(admin_filter)
